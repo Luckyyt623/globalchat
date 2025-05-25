@@ -30,27 +30,59 @@ def is_url(text: str) -> bool:
 # Function to extract song info from a YouTube link using web scraping
 def get_youtube_song_info(url: str) -> str:
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Method 1: Try the <title> tag
         title_tag = soup.find('title')
-        if not title_tag:
-            return "Could not extract song info: Title not found."
-        
-        title = title_tag.text.replace(' - YouTube', '').strip()
-        # Simple heuristic: assume format is "Song Name - Artist" or "Artist - Song Name"
+        title = None
+        if title_tag:
+            title = title_tag.text.replace(' - YouTube', '').strip()
+            logger.info(f"Extracted title from <title> tag: {title}")
+
+        # Method 2: Try the og:title meta tag (more reliable for YouTube)
+        if not title:
+            og_title_tag = soup.find('meta', property='og:title')
+            if og_title_tag and og_title_tag.get('content'):
+                title = og_title_tag['content'].strip()
+                logger.info(f"Extracted title from og:title: {title}")
+
+        # If no title found, try the description
+        if not title:
+            desc_tag = soup.find('meta', property='og:description')
+            if desc_tag and desc_tag.get('content'):
+                title = desc_tag['content'].strip()
+                logger.info(f"Extracted title from og:description: {title}")
+            else:
+                return "Could not extract song info: No title or description found."
+
+        # Clean up the title and try to parse song and artist
+        # Remove common YouTube suffixes like "[Official Video]" or "(Lyrics)"
+        title = re.sub(r'\[.*?\]|\(.*?\)|\s*-\s*Official\s*(Video|Music\s*Video|Audio|Lyrics)?', '', title, flags=re.IGNORECASE).strip()
+
+        # Split the title to guess song name and artist
         parts = title.split(' - ')
         if len(parts) >= 2:
-            # Try to guess which part is the song and which is the artist
-            song_name = parts[0] if "by" in title.lower() else parts[1]
-            artist = parts[1] if "by" in title.lower() else parts[0]
+            # Heuristic: Check for keywords to determine song vs artist
+            if "by" in title.lower():
+                song_name = parts[0].strip()
+                artist = parts[1].strip()
+            else:
+                # Assume the second part is the song name if "by" isn't present
+                artist = parts[0].strip()
+                song_name = parts[1].strip()
             return f"Song: {song_name} by {artist}"
-        return f"Song: {title}"
+        else:
+            # If we can't split, return the cleaned title as the song name
+            return f"Song: {title}"
     except Exception as e:
         logger.error(f"Error extracting song info from YouTube: {str(e)}")
-        return f"Error extracting song info: {str(e)}"
+        return f"Error: Could not extract song info ({str(e)})"
 
 # Handler for the /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
