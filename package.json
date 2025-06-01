@@ -1,0 +1,18 @@
+{
+  "name": "slither-vc-server",
+  "version": "1.0.0",
+  "description": "A simple WebRTC signaling server for Slither.io VC integration",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "keywords": ["webrtc", "signaling", "slither.io", "voice chat"],
+  "author": "Your Name",
+  "license": "MIT"
+}
