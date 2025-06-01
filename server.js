@@ -1,9 +1,16 @@
-// server.js
-
+const http = require('http');
 const WebSocket = require('ws');
+
 const PORT = process.env.PORT || 3000; // Render sets PORT as an env variable
 
-const wss = new WebSocket.Server({ port: PORT });
+// Create an HTTP server
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('WebSocket signaling server is running.');
+});
+
+// Create a WebSocket server using the HTTP server
+const wss = new WebSocket.Server({ server });
 
 console.log(`Signaling server running on port ${PORT}`);
 
@@ -63,4 +70,9 @@ wss.on('connection', (ws) => {
             }
         });
     });
+});
+
+// Start the server
+server.listen(PORT, () => {
+    console.log(`Server is listening on port ${PORT}`);
 });
