@@ -1,7 +1,21 @@
+const express = require('express');
+const http = require('http');
 const WebSocket = require('ws');
 
 const PORT = process.env.PORT || 3001; // Render.com sets PORT env variable
-const wss = new WebSocket.Server({ port: PORT });
+
+const app = express();
+
+// Simple HTTP endpoint
+app.get('/', (req, res) => {
+    res.send('Slither Chat Server is running!');
+});
+
+// Create HTTP server and attach Express app
+const server = http.createServer(app);
+
+// WebSocket server on the same HTTP server
+const wss = new WebSocket.Server({ server });
 
 // Store connected clients. A Set is efficient for adding/deleting.
 const clients = new Set();
@@ -19,7 +33,6 @@ wss.on('connection', (ws) => {
     ws.on('message', (message) => {
         let parsedMessage;
         try {
-            // WebSocket messages can be Buffers, convert to string first.
             const messageString = message.toString();
             parsedMessage = JSON.parse(messageString);
             console.log(`Received from ${ws.username}:`, parsedMessage);
@@ -30,14 +43,11 @@ wss.on('connection', (ws) => {
         }
 
         if (parsedMessage.type === 'chat-message' && typeof parsedMessage.text === 'string' && parsedMessage.text.trim() !== "") {
-            // Construct the message to broadcast, using the username stored on the server-side ws object
             const broadcastMessage = JSON.stringify({
                 type: 'chat-message',
-                username: ws.username, // Use the username associated with this connection
-                text: parsedMessage.text.trim() // Sanitize/validate text further if needed
+                username: ws.username,
+                text: parsedMessage.text.trim()
             });
-
-            // Broadcast to all clients
             clients.forEach(client => {
                 if (client.readyState === WebSocket.OPEN) {
                     client.send(broadcastMessage);
@@ -45,10 +55,8 @@ wss.on('connection', (ws) => {
             });
         } else if (parsedMessage.type === 'user-join' && typeof parsedMessage.username === 'string' && parsedMessage.username.trim() !== "") {
             const oldUsername = ws.username;
-            ws.username = parsedMessage.username.trim(); // Store/update username on the WebSocket connection object
+            ws.username = parsedMessage.username.trim();
             console.log(`User ${oldUsername} is now known as ${ws.username}`);
-
-            // Notify all clients about the new user (or username change)
             const joinNotification = JSON.stringify({
                 type: 'user-joined-notification',
                 text: `${ws.username} has joined the chat.`
@@ -67,8 +75,6 @@ wss.on('connection', (ws) => {
         const departingUsername = ws.username;
         clients.delete(ws);
         console.log(`Client ${departingUsername} disconnected. Total clients: ${clients.size}`);
-
-        // Notify remaining clients that a user has left
         const leftNotification = JSON.stringify({
             type: 'user-left-notification',
             text: `${departingUsername} has left the chat.`
@@ -82,20 +88,20 @@ wss.on('connection', (ws) => {
 
     ws.on('error', (error) => {
         console.error(`WebSocket error for client ${ws.username || 'Unknown'}: ${error.message}`);
-        // The 'close' event will usually follow an error that closes the connection.
     });
 });
 
-// Keep-alive mechanism for platforms like Render that might sleep free instances
-// or for general connection health.
+// Keep-alive mechanism for platforms like Render
 setInterval(() => {
     clients.forEach((ws) => {
-        if (ws.isAlive === false) return ws.terminate(); // isAlive is a custom flag you'd set
-
-        // Simple ping, client doesn't need to pong for this basic keep-alive
-        // More robust would be proper ping/pong
+        if (ws.isAlive === false) return ws.terminate();
         if (ws.readyState === WebSocket.OPEN) {
-            ws.ping(() => {}); // Send a ping
+            ws.ping(() => {});
         }
     });
-}, 30000); // Every 30 seconds
+}, 30000);
+
+// Start the HTTP and WebSocket server together
+server.listen(PORT, () => {
+    console.log(`HTTP & WebSocket server listening on port ${PORT}`);
+});
