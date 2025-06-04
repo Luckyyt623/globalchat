@@ -1,12 +1,13 @@
 {
   "name": "slither-chat-server",
   "version": "1.0.0",
-  "description": "WebSocket chat server for Slither.io",
+  "description": "Slither.io Chat Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
+    "express": "^4.18.0",
     "ws": "^8.0.0"
   }
 }
