@@ -1,100 +1,101 @@
-const http = require('http');
 const WebSocket = require('ws');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001; // Render.com sets PORT env variable
+const wss = new WebSocket.Server({ port: PORT });
 
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('WebSocket signaling server is running.');
-});
+// Store connected clients. A Set is efficient for adding/deleting.
+const clients = new Set();
 
-const wss = new WebSocket.Server({ server });
-console.log(`Signaling server started on port ${PORT}`);
-
-const rooms = {}; // { roomName: Set<WebSocket> } using Set for easier add/delete
+console.log(`Chat server started on port ${PORT}`);
 
 wss.on('connection', (ws) => {
-    let currentRoom = null; // Store the room this client is in
+    clients.add(ws);
+    ws.username = "AnonymousSnake"; // Default username, updated by 'user-join'
+    console.log(`Client connected. Current username: ${ws.username}. Total clients: ${clients.size}`);
 
-    console.log('Client connected');
+    // Send a welcome message to the newly connected client
+    ws.send(JSON.stringify({ type: 'server-message', text: 'Welcome to Slither Chat!' }));
 
     ws.on('message', (message) => {
-        let data;
+        let parsedMessage;
         try {
-            data = JSON.parse(message);
-            console.log('Received message:', data);
-        } catch (err) {
-            console.error('Invalid JSON:', message);
+            // WebSocket messages can be Buffers, convert to string first.
+            const messageString = message.toString();
+            parsedMessage = JSON.parse(messageString);
+            console.log(`Received from ${ws.username}:`, parsedMessage);
+        } catch (e) {
+            console.error(`Failed to parse message from ${ws.username}:`, message.toString(), e);
+            ws.send(JSON.stringify({ type: 'server-message', text: 'Error: Your message was unreadable.' }));
             return;
         }
 
-        switch (data.type) {
-            case 'join':
-                currentRoom = data.room;
-                if (!currentRoom) {
-                    console.error('Join message missing room');
-                    return;
-                }
-                if (!rooms[currentRoom]) {
-                    rooms[currentRoom] = new Set();
-                }
-                rooms[currentRoom].add(ws);
-                console.log(`User joined room: ${currentRoom}. Room size: ${rooms[currentRoom].size}`);
+        if (parsedMessage.type === 'chat-message' && typeof parsedMessage.text === 'string' && parsedMessage.text.trim() !== "") {
+            // Construct the message to broadcast, using the username stored on the server-side ws object
+            const broadcastMessage = JSON.stringify({
+                type: 'chat-message',
+                username: ws.username, // Use the username associated with this connection
+                text: parsedMessage.text.trim() // Sanitize/validate text further if needed
+            });
 
-                // Notify other peers in the room about the new peer
-                rooms[currentRoom].forEach(peer => {
-                    if (peer !== ws && peer.readyState === WebSocket.OPEN) {
-                        peer.send(JSON.stringify({ type: 'new-peer', peerId: 'some_unique_id_for_ws' })); // You might want to assign IDs to peers
-                    }
-                });
-                break;
-
-            // These messages are broadcast to others in the *currentRoom* of the sender
-            case 'offer':
-            case 'answer':
-            case 'ice-candidate': // Corrected from 'ice'
-                if (!currentRoom || !rooms[currentRoom]) {
-                    console.error(`Cannot relay ${data.type}: User not in a room or room does not exist.`);
-                    return;
+            // Broadcast to all clients
+            clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(broadcastMessage);
                 }
-                console.log(`Relaying ${data.type} in room ${currentRoom} from a peer.`);
-                rooms[currentRoom].forEach(peer => {
-                    if (peer !== ws && peer.readyState === WebSocket.OPEN) {
-                        peer.send(JSON.stringify(data)); // Forward the original message
-                    }
-                });
-                break;
+            });
+        } else if (parsedMessage.type === 'user-join' && typeof parsedMessage.username === 'string' && parsedMessage.username.trim() !== "") {
+            const oldUsername = ws.username;
+            ws.username = parsedMessage.username.trim(); // Store/update username on the WebSocket connection object
+            console.log(`User ${oldUsername} is now known as ${ws.username}`);
 
-            default:
-                console.warn('Unknown message type received:', data.type);
+            // Notify all clients about the new user (or username change)
+            const joinNotification = JSON.stringify({
+                type: 'user-joined-notification',
+                text: `${ws.username} has joined the chat.`
+            });
+            clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(joinNotification);
+                }
+            });
+        } else {
+            console.warn(`Unknown message type or invalid payload from ${ws.username}:`, parsedMessage);
         }
     });
 
     ws.on('close', () => {
-        console.log('Client disconnected');
-        if (currentRoom && rooms[currentRoom]) {
-            rooms[currentRoom].delete(ws);
-            console.log(`User removed from room: ${currentRoom}. New room size: ${rooms[currentRoom].size}`);
-            if (rooms[currentRoom].size === 0) {
-                console.log(`Room ${currentRoom} is empty, deleting.`);
-                delete rooms[currentRoom];
-            } else {
-                // Notify remaining peers
-                rooms[currentRoom].forEach(peer => {
-                    if (peer.readyState === WebSocket.OPEN) {
-                        // You might want to send a 'peer-left' message
-                        // peer.send(JSON.stringify({ type: 'peer-left', peerId: 'some_unique_id_for_ws' }));
-                    }
-                });
+        const departingUsername = ws.username;
+        clients.delete(ws);
+        console.log(`Client ${departingUsername} disconnected. Total clients: ${clients.size}`);
+
+        // Notify remaining clients that a user has left
+        const leftNotification = JSON.stringify({
+            type: 'user-left-notification',
+            text: `${departingUsername} has left the chat.`
+        });
+        clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(leftNotification);
             }
-        }
+        });
     });
 
     ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
+        console.error(`WebSocket error for client ${ws.username || 'Unknown'}: ${error.message}`);
+        // The 'close' event will usually follow an error that closes the connection.
     });
 });
 
-server.listen(PORT, () => {
-    console.log(`HTTP Server is listening on port ${PORT}`);
-});
+// Keep-alive mechanism for platforms like Render that might sleep free instances
+// or for general connection health.
+setInterval(() => {
+    clients.forEach((ws) => {
+        if (ws.isAlive === false) return ws.terminate(); // isAlive is a custom flag you'd set
+
+        // Simple ping, client doesn't need to pong for this basic keep-alive
+        // More robust would be proper ping/pong
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.ping(() => {}); // Send a ping
+        }
+    });
+}, 30000); // Every 30 seconds
