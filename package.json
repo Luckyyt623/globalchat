@@ -1,7 +1,7 @@
 {
   "name": "slither-chat-server",
   "version": "1.0.0",
-  "description": "Slither.io Chat Server",
+  "description": "Global chat",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
