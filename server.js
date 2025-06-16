@@ -8,7 +8,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const clients = new Set();
 
-const messageHistory = []; // Store last 50 messages
+const messageHistory = []; // Last 50 messages
 
 app.get('/', (req, res) => {
     res.send('Slither Chat Server is running!');
@@ -16,9 +16,9 @@ app.get('/', (req, res) => {
 
 wss.on('connection', (ws) => {
     clients.add(ws);
-    ws.username = "AnonymousSnake";
+    ws.username = null; // Not joined yet
 
-    // Send existing message history to new user
+    // Send message history
     ws.send(JSON.stringify({ type: 'chat-history', messages: messageHistory }));
 
     ws.on('message', (message) => {
@@ -29,11 +29,27 @@ wss.on('connection', (ws) => {
             return;
         }
 
+        const now = getCurrentTime();
+
         if (parsedMessage.type === 'user-join') {
-            ws.username = parsedMessage.username.trim();
-            broadcast({ type: 'user-joined-notification', text: `${ws.username} has joined.` });
-        } else if (parsedMessage.type === 'chat-message') {
-            const msg = { type: 'chat-message', username: ws.username, text: parsedMessage.text };
+            ws.username = parsedMessage.username?.trim() || 'AnonymousSnake';
+            const joinMsg = {
+                type: 'user-joined-notification',
+                text: `${ws.username} has joined.`,
+                timestamp: now
+            };
+            broadcast(joinMsg);
+        }
+
+        if (!ws.username) return; // Don't allow chat without joining
+
+        if (parsedMessage.type === 'chat-message') {
+            const msg = {
+                type: 'chat-message',
+                username: ws.username,
+                text: parsedMessage.text,
+                timestamp: now
+            };
             messageHistory.push(msg);
             if (messageHistory.length > 50) messageHistory.shift();
             broadcast(msg);
@@ -42,7 +58,14 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         clients.delete(ws);
-        broadcast({ type: 'user-left-notification', text: `${ws.username} has left.` });
+        if (ws.username) {
+            const leaveMsg = {
+                type: 'user-left-notification',
+                text: `${ws.username} has left.`,
+                timestamp: getCurrentTime()
+            };
+            broadcast(leaveMsg);
+        }
     });
 });
 
@@ -55,6 +78,16 @@ function broadcast(data) {
     });
 }
 
+function getCurrentTime() {
+    return new Date().toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+        timeZone: 'Asia/Kolkata'
+    });
+}
+
 server.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
+    console.log(`✅ Chat server running on ws://localhost:${PORT}`);
 });
