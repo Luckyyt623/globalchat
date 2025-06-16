@@ -2,6 +2,7 @@
   "name": "slither-chat-server",
   "version": "1.0.0",
   "description": "Global chat",
+  "author": "Lucky"
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
