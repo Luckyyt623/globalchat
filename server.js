@@ -8,18 +8,34 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const clients = new Set();
 
-const messageHistory = []; // Last 50 messages
+let messageHistory = []; // Will be cleaned automatically
 
 app.get('/', (req, res) => {
     res.send('Slither Chat Server is running!');
 });
 
+// Clean messages older than 30 minutes every 1 minute
+setInterval(() => {
+    const now = Date.now();
+    const THIRTY_MINUTES = 30 * 60 * 1000;
+
+    messageHistory = messageHistory.filter(msg => {
+        return now - msg.timestamp < THIRTY_MINUTES;
+    });
+}, 60 * 1000); // Clean every 60 seconds
+
 wss.on('connection', (ws) => {
     clients.add(ws);
-    ws.username = null; // Not joined yet
+    ws.username = null;
 
-    // Send message history
-    ws.send(JSON.stringify({ type: 'chat-history', messages: messageHistory }));
+    // Send existing message history (within 30 min only)
+    ws.send(JSON.stringify({
+        type: 'chat-history',
+        messages: messageHistory.map(msg => ({
+            ...msg,
+            timestamp: formatTime(msg.timestamp)
+        }))
+    }));
 
     ws.on('message', (message) => {
         let parsedMessage;
@@ -29,7 +45,7 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        const now = getCurrentTime();
+        const now = Date.now();
 
         if (parsedMessage.type === 'user-join') {
             ws.username = parsedMessage.username?.trim() || 'AnonymousSnake';
@@ -41,7 +57,7 @@ wss.on('connection', (ws) => {
             broadcast(joinMsg);
         }
 
-        if (!ws.username) return; // Don't allow chat without joining
+        if (!ws.username) return; // Block chat before joining
 
         if (parsedMessage.type === 'chat-message') {
             const msg = {
@@ -51,7 +67,6 @@ wss.on('connection', (ws) => {
                 timestamp: now
             };
             messageHistory.push(msg);
-            if (messageHistory.length > 50) messageHistory.shift();
             broadcast(msg);
         }
     });
@@ -62,7 +77,7 @@ wss.on('connection', (ws) => {
             const leaveMsg = {
                 type: 'user-left-notification',
                 text: `${ws.username} has left.`,
-                timestamp: getCurrentTime()
+                timestamp: Date.now()
             };
             broadcast(leaveMsg);
         }
@@ -70,7 +85,11 @@ wss.on('connection', (ws) => {
 });
 
 function broadcast(data) {
-    const strData = JSON.stringify(data);
+    const outgoing = {
+        ...data,
+        timestamp: formatTime(data.timestamp)
+    };
+    const strData = JSON.stringify(outgoing);
     clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(strData);
@@ -78,8 +97,8 @@ function broadcast(data) {
     });
 }
 
-function getCurrentTime() {
-    return new Date().toLocaleTimeString('en-IN', {
+function formatTime(ms) {
+    return new Date(ms).toLocaleTimeString('en-IN', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
