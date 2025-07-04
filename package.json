@@ -4,7 +4,7 @@
   "description": "A global chat server for Slither.io using Node.js and WebSocket.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server.js"
   },
   "engines": {
     "node": "18.x"
