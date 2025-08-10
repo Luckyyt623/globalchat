@@ -15,10 +15,10 @@ const MSG_LIFETIME_MS = 10 * 60 * 1000; // 10 minutes
 // Clean messages older than 10 minutes every 2 minutes
 setInterval(() => {
     const now = Date.now();
-    messageHistory = messageHistory.filter(msg => now - msg._rawTime < MSG_LIFETIME_MS);
+    messageHistory = messageHistory.filter(msg => now - msg.rawTime < MSG_LIFETIME_MS);
 }, 120 * 1000);
 
-// Health check endpoint for Render
+// Health check endpoint
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
@@ -31,15 +31,10 @@ wss.on('connection', (ws) => {
     clients.add(ws);
     ws.username = null;
 
-    // Send existing message history
+    // Send existing history
     ws.send(JSON.stringify({
         type: 'chat-history',
-        messages: messageHistory.map(msg => ({
-            type: msg.type,
-            username: msg.username,
-            text: msg.text,
-            timestamp: formatTime(msg._rawTime)
-        }))
+        messages: messageHistory
     }));
 
     ws.on('message', (message) => {
@@ -50,7 +45,7 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({
                 type: 'system-message',
                 text: 'Invalid message format.',
-                timestamp: formatTime(Date.now())
+                rawTime: Date.now()
             }));
             return;
         }
@@ -62,13 +57,9 @@ wss.on('connection', (ws) => {
             const joinMsg = {
                 type: 'system-message',
                 text: `${ws.username} has joined.`,
-                _rawTime: now
+                rawTime: now
             };
-            messageHistory.push(joinMsg);
-            if (messageHistory.length > MAX_HISTORY) {
-                messageHistory.shift();
-            }
-            broadcast(joinMsg);
+            pushMessage(joinMsg);
         }
 
         if (!ws.username) return;
@@ -78,24 +69,15 @@ wss.on('connection', (ws) => {
                 type: 'chat-message',
                 username: ws.username,
                 text: parsedMessage.text,
-                _rawTime: now
+                rawTime: now
             };
-            messageHistory.push(msg);
-            if (messageHistory.length > MAX_HISTORY) {
-                messageHistory.shift();
-            }
-            broadcast(msg);
+            pushMessage(msg);
         }
 
         if (parsedMessage.type === 'get-history') {
             ws.send(JSON.stringify({
                 type: 'chat-history',
-                messages: messageHistory.map(msg => ({
-                    type: msg.type,
-                    username: msg.username,
-                    text: msg.text,
-                    timestamp: formatTime(msg._rawTime)
-                }))
+                messages: messageHistory
             }));
         }
     });
@@ -105,40 +87,28 @@ wss.on('connection', (ws) => {
             const leaveMsg = {
                 type: 'system-message',
                 text: `${ws.username} has left.`,
-                _rawTime: Date.now()
+                rawTime: Date.now()
             };
-            messageHistory.push(leaveMsg);
-            if (messageHistory.length > MAX_HISTORY) {
-                messageHistory.shift();
-            }
-            broadcast(leaveMsg);
+            pushMessage(leaveMsg);
         }
         clients.delete(ws);
     });
 });
 
+function pushMessage(msg) {
+    messageHistory.push(msg);
+    if (messageHistory.length > MAX_HISTORY) {
+        messageHistory.shift();
+    }
+    broadcast(msg);
+}
+
 function broadcast(data) {
-    const outgoing = {
-        type: data.type,
-        text: data.text,
-        username: data.username,
-        timestamp: formatTime(data._rawTime)
-    };
-    const strData = JSON.stringify(outgoing);
+    const strData = JSON.stringify(data);
     clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(strData);
         }
-    });
-}
-
-function formatTime(ms) {
-    return new Date(ms).toLocaleTimeString('en-IN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-        timeZone: 'Asia/Kolkata'
     });
 }
 
